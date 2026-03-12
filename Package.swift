@@ -17,7 +17,15 @@ let package = Package(
                 .product(name: "MCP", package: "swift-sdk")
             ],
             path: "Sources/Stem",
-            exclude: ["Stem.entitlements"]
+            exclude: ["Stem.entitlements", "Info.plist"],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/Stem/Info.plist"
+                ])
+            ]
         )
     ]
 )
