@@ -109,10 +109,18 @@ func startServer() async throws {
             }
 
         case "get_song_details":
-            return try await handleGetSongDetails(params: params)
+            do {
+                return try await handleGetSongDetails(params: params)
+            } catch {
+                return .init(content: [.text("Error getting song details: \(error.localizedDescription)")], isError: true)
+            }
 
         case "get_album_details":
-            return try await handleGetAlbumDetails(params: params)
+            do {
+                return try await handleGetAlbumDetails(params: params)
+            } catch {
+                return .init(content: [.text("Error getting album details: \(error.localizedDescription)")], isError: true)
+            }
 
         case "get_now_playing":
             return await handleGetNowPlaying()
@@ -127,25 +135,49 @@ func startServer() async throws {
             return await handleSkipPrevious()
 
         case "play_song":
-            return try await handlePlaySong(params: params)
+            do {
+                return try await handlePlaySong(params: params)
+            } catch {
+                return .init(content: [.text(playbackErrorMessage(error))], isError: true)
+            }
 
         case "get_queue":
             return await handleGetQueue()
 
         case "set_queue":
-            return try await handleSetQueue(params: params)
+            do {
+                return try await handleSetQueue(params: params)
+            } catch {
+                return .init(content: [.text(playbackErrorMessage(error))], isError: true)
+            }
 
         case "get_library_playlists":
-            return try await handleGetLibraryPlaylists(params: params)
+            do {
+                return try await handleGetLibraryPlaylists(params: params)
+            } catch {
+                return .init(content: [.text("Error fetching playlists: \(error.localizedDescription)")], isError: true)
+            }
 
         case "get_recently_played":
-            return try await handleGetRecentlyPlayed(params: params)
+            do {
+                return try await handleGetRecentlyPlayed(params: params)
+            } catch {
+                return .init(content: [.text("Error fetching recently played: \(error.localizedDescription)")], isError: true)
+            }
 
         case "create_playlist":
-            return try await handleCreatePlaylist(params: params)
+            do {
+                return try await handleCreatePlaylist(params: params)
+            } catch {
+                return .init(content: [.text("Error creating playlist: \(error.localizedDescription)")], isError: true)
+            }
 
         case "add_to_playlist":
-            return try await handleAddToPlaylist(params: params)
+            do {
+                return try await handleAddToPlaylist(params: params)
+            } catch {
+                return .init(content: [.text("Error adding to playlist: \(error.localizedDescription)")], isError: true)
+            }
 
         default:
             return .init(content: [.text("Unknown tool: \(params.name)")], isError: true)
@@ -190,13 +222,16 @@ func handleSearchCatalog(params: CallTool.Parameters) async throws -> CallTool.R
             results.append("[\(artist.id)] \(artist.name)")
         }
 
-    default:
+    case "song":
         var request = MusicCatalogSearchRequest(term: query, types: [Song.self])
         request.limit = clampedLimit
         let response = try await request.response()
         for song in response.songs {
             results.append("[\(song.id)] \(song.title) by \(song.artistName) — \(song.albumTitle ?? "unknown album")")
         }
+
+    default:
+        return .init(content: [.text("Unsupported search type: '\(typeStr)'. Use 'song', 'album', or 'artist'.")], isError: true)
     }
 
     if results.isEmpty {
@@ -429,7 +464,9 @@ func handleGetLibraryPlaylists(params: CallTool.Parameters) async throws -> Call
     let clampedLimit = min(max(limit, 1), 100)
 
     // Use REST API — MusicLibraryRequest<Playlist> returns empty on macOS CLI
-    let url = URL(string: "https://api.music.apple.com/v1/me/library/playlists?limit=\(clampedLimit)")!
+    guard let url = URL(string: "https://api.music.apple.com/v1/me/library/playlists?limit=\(clampedLimit)") else {
+        return .init(content: [.text("Failed to construct API URL.")], isError: true)
+    }
     let dataRequest = MusicDataRequest(urlRequest: URLRequest(url: url))
     let response = try await dataRequest.response()
 
@@ -455,7 +492,9 @@ func handleGetRecentlyPlayed(params: CallTool.Parameters) async throws -> CallTo
     let limit = params.arguments?["limit"]?.intValue ?? 10
     let clampedLimit = min(max(limit, 1), 25)
 
-    let url = URL(string: "https://api.music.apple.com/v1/me/recent/played/tracks")!
+    guard let url = URL(string: "https://api.music.apple.com/v1/me/recent/played/tracks?limit=\(clampedLimit)") else {
+        return .init(content: [.text("Failed to construct API URL.")], isError: true)
+    }
     let dataRequest = MusicDataRequest(urlRequest: URLRequest(url: url))
     let response = try await dataRequest.response()
 
@@ -498,7 +537,9 @@ func handleCreatePlaylist(params: CallTool.Parameters) async throws -> CallTool.
 
     let bodyData = try JSONSerialization.data(withJSONObject: body)
 
-    let url = URL(string: "https://api.music.apple.com/v1/me/library/playlists")!
+    guard let url = URL(string: "https://api.music.apple.com/v1/me/library/playlists") else {
+        return .init(content: [.text("Failed to construct API URL.")], isError: true)
+    }
     var urlRequest = URLRequest(url: url)
     urlRequest.httpMethod = "POST"
     urlRequest.httpBody = bodyData
@@ -539,6 +580,12 @@ func handleAddToPlaylist(params: CallTool.Parameters) async throws -> CallTool.R
         return .init(content: [.text("No valid song IDs provided.")], isError: true)
     }
 
+    // Validate playlist ID format (alphanumeric with dots, e.g. "p.XXXXXXXXX")
+    let allowedChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "."))
+    guard playlistID.unicodeScalars.allSatisfy({ allowedChars.contains($0) }) else {
+        return .init(content: [.text("Invalid playlist ID format: \(playlistID)")], isError: true)
+    }
+
     // POST directly to the REST API — MusicLibraryRequest doesn't reliably
     // find playlists on macOS, especially newly created ones.
     let trackData = songIds.map { id -> [String: Any] in
@@ -548,7 +595,9 @@ func handleAddToPlaylist(params: CallTool.Parameters) async throws -> CallTool.R
     let body: [String: Any] = ["data": trackData]
     let bodyData = try JSONSerialization.data(withJSONObject: body)
 
-    let url = URL(string: "https://api.music.apple.com/v1/me/library/playlists/\(playlistID)/tracks")!
+    guard let url = URL(string: "https://api.music.apple.com/v1/me/library/playlists/\(playlistID)/tracks") else {
+        return .init(content: [.text("Failed to construct API URL.")], isError: true)
+    }
     var urlRequest = URLRequest(url: url)
     urlRequest.httpMethod = "POST"
     urlRequest.httpBody = bodyData

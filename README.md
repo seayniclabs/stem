@@ -75,7 +75,7 @@ Or add manually to `~/.claude.json`:
   "mcpServers": {
     "stem": {
       "command": "/path/to/stem",
-      "args": []
+      "args": ["serve"]
     }
   }
 }
@@ -109,7 +109,7 @@ swift build           # debug build
 swift build -c release  # release build
 ```
 
-Stem requires Swift 6.0+ and targets macOS 14+.
+Stem requires Swift 6.1+ and targets macOS 14+.
 
 ## License
 
